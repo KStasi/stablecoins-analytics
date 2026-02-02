@@ -1,28 +1,28 @@
 #!/bin/bash
 
-echo "🚀 Starting Stablecoins Analytics"
+echo "Starting Stablecoins Analytics"
 echo ""
 
-echo "1️⃣ Starting PostgreSQL database..."
+echo "1. Starting PostgreSQL database..."
 docker-compose up -d
 
-echo "⏳ Waiting for database to be ready..."
+echo "Waiting for database to be ready..."
 sleep 5
 
 echo ""
-echo "2️⃣ Running initial data collection..."
-uv run python collector.py
+echo "2. Running initial data collection..."
+uv run python scripts/collector.py
 
 echo ""
-echo "3️⃣ Starting background scheduler..."
-uv run python scheduler.py &
+echo "3. Starting background scheduler..."
+uv run python scripts/scheduler.py &
 SCHEDULER_PID=$!
 
 echo ""
-echo "4️⃣ Starting Streamlit app..."
+echo "4. Starting Streamlit app..."
 echo "   App will be available at http://localhost:8501"
 echo ""
-echo "📝 Scheduler running in background (PID: $SCHEDULER_PID)"
+echo "Scheduler running in background (PID: $SCHEDULER_PID)"
 echo "   To stop scheduler: kill $SCHEDULER_PID"
 echo ""
 
