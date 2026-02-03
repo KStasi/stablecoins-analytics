@@ -3,14 +3,21 @@ from src.database import init_db
 from src.const import CACHE_TTL_SHORT, CACHE_TTL_LONG
 from src.data_service import (
     get_available_symbols,
+    get_earliest_transaction_date,
     load_slippage_matrix,
     get_transaction_counts,
     get_volume_matrix,
     get_routes_data,
     get_overall_stats,
     get_token_stats,
+    get_token_daily_stats,
 )
-from src.ui.pages import render_per_token_tab, render_routes_tab
+from src.ui.pages import render_same_token_tab, render_routes_tab
+
+
+@st.cache_data(ttl=CACHE_TTL_LONG)
+def cached_get_earliest_date():
+    return get_earliest_transaction_date()
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
@@ -19,39 +26,42 @@ def cached_get_available_symbols():
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
-def cached_load_slippage_matrix(symbol, days, percentile_type):
-    return load_slippage_matrix(symbol, days, percentile_type)
+def cached_load_slippage_matrix(symbol, start_date, end_date, percentile_type):
+    return load_slippage_matrix(symbol, start_date, end_date, percentile_type)
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
-def cached_get_transaction_counts(symbol, days):
-    return get_transaction_counts(symbol, days)
+def cached_get_transaction_counts(symbol, start_date, end_date):
+    return get_transaction_counts(symbol, start_date, end_date)
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
-def cached_get_volume_matrix(symbol, days):
-    return get_volume_matrix(symbol, days)
+def cached_get_volume_matrix(symbol, start_date, end_date):
+    return get_volume_matrix(symbol, start_date, end_date)
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
-def cached_get_routes_data(days, percentile_type):
-    return get_routes_data(days, percentile_type)
+def cached_get_routes_data(start_date, end_date, percentile_type, min_amount, max_amount):
+    return get_routes_data(start_date, end_date, percentile_type, min_amount, max_amount)
 
 
 @st.cache_data(ttl=CACHE_TTL_LONG)
-def cached_get_overall_stats(days):
-    return get_overall_stats(days)
+def cached_get_overall_stats(start_date, end_date):
+    return get_overall_stats(start_date, end_date)
 
 
 @st.cache_data(ttl=CACHE_TTL_LONG)
-def cached_get_token_stats(symbol, days):
-    return get_token_stats(symbol, days)
+def cached_get_token_stats(symbol, start_date, end_date):
+    return get_token_stats(symbol, start_date, end_date)
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def cached_get_token_daily_stats(symbol, start_date, end_date):
+    return get_token_daily_stats(symbol, start_date, end_date)
 
 
 def main():
     st.set_page_config(page_title="Stablecoin Bridge Analytics", layout="wide")
-    st.title("Stablecoin Bridge Analytics")
-    st.markdown("### Cross-Chain Bridging Analysis Dashboard")
 
     init_db()
 
@@ -60,19 +70,33 @@ def main():
         st.error("No tokens found in database. Please run the collector first.")
         st.stop()
 
-    main_tab1, main_tab2 = st.tabs(["Per Token Analysis", "Routes Analysis"])
+    earliest_date = cached_get_earliest_date()
 
-    with main_tab1:
-        render_per_token_tab(
+    # Sidebar navigation
+    with st.sidebar:
+        st.header("Navigation")
+        page = st.radio(
+            "Go to",
+            ["Same Token Transfers", "Routes Analysis"],
+            label_visibility="collapsed",
+        )
+
+    st.title("Stablecoin Bridge Analytics")
+    st.markdown("### Cross-Chain Bridging Analysis Dashboard")
+
+    if page == "Same Token Transfers":
+        render_same_token_tab(
             symbols=symbols,
+            earliest_date=earliest_date,
             get_token_stats_fn=cached_get_token_stats,
             load_slippage_matrix_fn=cached_load_slippage_matrix,
             get_transaction_counts_fn=cached_get_transaction_counts,
             get_volume_matrix_fn=cached_get_volume_matrix,
+            get_token_daily_stats_fn=cached_get_token_daily_stats,
         )
-
-    with main_tab2:
+    else:
         render_routes_tab(
+            earliest_date=earliest_date,
             get_stats_fn=cached_get_overall_stats,
             get_routes_data_fn=cached_get_routes_data,
         )

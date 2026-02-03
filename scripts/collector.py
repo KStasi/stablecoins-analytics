@@ -7,18 +7,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.database import SessionLocal, init_db
 from src.api_client import fetch_transactions_page
-from src.transaction_service import store_transactions
+from src.transaction_service import store_transactions, get_oldest_transaction_timestamp
 from src.cache_service import update_slippage_cache
 from src.const import (
     PAGINATION_SIZE,
-    MAX_PAGES_DEFAULT,
     API_RATE_LIMIT_DELAY,
     DATA_START_DATE,
-    FIELD_DATA,
+    FIELD_CREATED_AT,
 )
 
 
-def collect_data(max_pages: int = MAX_PAGES_DEFAULT) -> None:
+def collect_data() -> None:
     """Main collection function - fetches all transactions from start date."""
     print(f"[{datetime.now()}] Starting data collection...")
     print(f"Collecting all transactions since {DATA_START_DATE}")
@@ -30,16 +29,25 @@ def collect_data(max_pages: int = MAX_PAGES_DEFAULT) -> None:
         total_stored = 0
         page = 1
 
-        while page <= max_pages:
-            print(f"\nPage {page}/{max_pages}...")
+        # Resume from oldest transaction to continue fetching older data
+        end_timestamp = get_oldest_transaction_timestamp(db)
+        if end_timestamp:
+            print(f"Resuming from oldest transaction timestamp: {end_timestamp}...")
+        else:
+            print("No existing transactions, starting from scratch")
 
-            data = fetch_transactions_page(page=page, per_page=PAGINATION_SIZE)
+        while True:
+            print(f"\nPage {page}...")
+
+            data = fetch_transactions_page(
+                per_page=PAGINATION_SIZE, end_timestamp=end_timestamp
+            )
 
             if not data:
                 print("  No data returned, stopping")
                 break
 
-            transactions = data.get(FIELD_DATA, [])
+            transactions = data if isinstance(data, list) else []
 
             if not transactions:
                 print("  No more transactions")
@@ -51,6 +59,21 @@ def collect_data(max_pages: int = MAX_PAGES_DEFAULT) -> None:
             stored = store_transactions(db, transactions)
             total_stored += stored
             print(f"  Stored {stored} new transactions (total stored: {total_stored})")
+
+            # Get end_timestamp for next page from the last transaction
+            if len(transactions) < PAGINATION_SIZE:
+                print("  Reached end of data")
+                break
+
+            last_tx = transactions[-1]
+            created_at_str = last_tx.get(FIELD_CREATED_AT)
+            if not created_at_str:
+                print("  No timestamp found in last transaction, stopping")
+                break
+
+            end_timestamp = datetime.fromisoformat(
+                created_at_str.replace("Z", "+00:00")
+            )
 
             page += 1
 
@@ -75,4 +98,4 @@ def collect_data(max_pages: int = MAX_PAGES_DEFAULT) -> None:
 
 
 if __name__ == "__main__":
-    collect_data(max_pages=MAX_PAGES_DEFAULT)
+    collect_data()

@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, date
 from sqlalchemy import func
+from sqlalchemy.orm import aliased
 from src.database import SessionLocal, Token, BridgeTransaction
 from src.const import (
     SAME_CHAIN_SLIPPAGE,
@@ -19,40 +20,62 @@ def calculate_percentile(values: list, percentile) -> float | None:
     return np.percentile(values, percentile)
 
 
-def get_cutoff_date(days: int | None) -> datetime | None:
-    """Get cutoff date for time filtering."""
-    if days:
-        return datetime.utcnow() - timedelta(days=days)
-    return None
+def _apply_date_filter(query, start_date: date | None, end_date: date | None):
+    """Apply date range filter to a query."""
+    if start_date:
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        query = query.filter(BridgeTransaction.created_at >= start_datetime)
+    if end_date:
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        query = query.filter(BridgeTransaction.created_at <= end_datetime)
+    return query
+
+
+def get_earliest_transaction_date() -> date | None:
+    """Get the earliest transaction date from the database."""
+    db = SessionLocal()
+    try:
+        result = db.query(func.min(BridgeTransaction.created_at)).scalar()
+        if result:
+            return result.date()
+        return None
+    finally:
+        db.close()
 
 
 def get_available_symbols() -> list[str]:
-    """Get list of unique token symbols."""
+    """Get list of unique token symbols (case-insensitive grouping)."""
     db = SessionLocal()
     try:
         symbols = (
             db.query(Token.symbol)
-            .distinct()
             .filter(Token.symbol != UNKNOWN_SYMBOL)
-            .order_by(Token.symbol)
             .all()
         )
-        return [s[0] for s in symbols]
+        # Group symbols case-insensitively, keeping the uppercase version
+        symbol_map = {}
+        for (symbol,) in symbols:
+            key = symbol.upper()
+            if key not in symbol_map:
+                symbol_map[key] = symbol.upper()
+        return sorted(symbol_map.values())
     finally:
         db.close()
 
 
 def get_token_ids_for_symbol(db, symbol: str) -> list[int]:
-    """Get all token IDs for a given symbol."""
-    tokens = db.query(Token.id).filter_by(symbol=symbol).all()
+    """Get all token IDs for a given symbol (case-insensitive)."""
+    tokens = db.query(Token.id).filter(
+        func.upper(Token.symbol) == symbol.upper()
+    ).all()
     return [t[0] for t in tokens]
 
 
 def get_chains_for_symbol(db, symbol: str) -> list[str]:
-    """Get all chains where a token symbol is available."""
+    """Get all chains where a token symbol is available (case-insensitive)."""
     chains = (
         db.query(Token.chain)
-        .filter(Token.symbol == symbol, Token.chain.isnot(None))
+        .filter(func.upper(Token.symbol) == symbol.upper(), Token.chain.isnot(None))
         .distinct()
         .order_by(Token.chain)
         .all()
@@ -61,7 +84,10 @@ def get_chains_for_symbol(db, symbol: str) -> list[str]:
 
 
 def load_slippage_matrix(
-    symbol: str, days: int = None, percentile_type: str = "avg"
+    symbol: str,
+    start_date: date = None,
+    end_date: date = None,
+    percentile_type: str | int = "avg",
 ) -> pd.DataFrame:
     """Load slippage matrix for a token across all its available chains."""
     db = SessionLocal()
@@ -73,11 +99,11 @@ def load_slippage_matrix(
 
         matrix = pd.DataFrame(index=chains, columns=chains, dtype=float)
 
-        # Build chain -> token_id mapping for this symbol
-        tokens = db.query(Token).filter_by(symbol=symbol).all()
+        # Build chain -> token_id mapping for this symbol (case-insensitive)
+        tokens = db.query(Token).filter(
+            func.upper(Token.symbol) == symbol.upper()
+        ).all()
         chain_to_token = {t.chain: t.id for t in tokens if t.chain}
-
-        cutoff_date = get_cutoff_date(days)
 
         for from_chain in chains:
             for to_chain in chains:
@@ -92,11 +118,7 @@ def load_slippage_matrix(
                             BridgeTransaction.token_in_id == token_in_id,
                             BridgeTransaction.token_out_id == token_out_id,
                         )
-
-                        if cutoff_date:
-                            query = query.filter(
-                                BridgeTransaction.created_at >= cutoff_date
-                            )
+                        query = _apply_date_filter(query, start_date, end_date)
 
                         slippages = [s[0] for s in query.all()]
 
@@ -114,7 +136,11 @@ def load_slippage_matrix(
         db.close()
 
 
-def get_transaction_counts(symbol: str, days: int = None) -> pd.DataFrame:
+def get_transaction_counts(
+    symbol: str,
+    start_date: date = None,
+    end_date: date = None,
+) -> pd.DataFrame:
     """Get transaction counts matrix for a token across all its available chains."""
     db = SessionLocal()
 
@@ -125,10 +151,10 @@ def get_transaction_counts(symbol: str, days: int = None) -> pd.DataFrame:
 
         matrix = pd.DataFrame(index=chains, columns=chains, dtype=int)
 
-        tokens = db.query(Token).filter_by(symbol=symbol).all()
+        tokens = db.query(Token).filter(
+            func.upper(Token.symbol) == symbol.upper()
+        ).all()
         chain_to_token = {t.chain: t.id for t in tokens if t.chain}
-
-        cutoff_date = get_cutoff_date(days)
 
         for from_chain in chains:
             for to_chain in chains:
@@ -143,11 +169,7 @@ def get_transaction_counts(symbol: str, days: int = None) -> pd.DataFrame:
                             BridgeTransaction.token_in_id == token_in_id,
                             BridgeTransaction.token_out_id == token_out_id,
                         )
-
-                        if cutoff_date:
-                            query = query.filter(
-                                BridgeTransaction.created_at >= cutoff_date
-                            )
+                        query = _apply_date_filter(query, start_date, end_date)
 
                         count = query.scalar() or 0
                         matrix.loc[from_chain, to_chain] = count
@@ -160,7 +182,11 @@ def get_transaction_counts(symbol: str, days: int = None) -> pd.DataFrame:
         db.close()
 
 
-def get_volume_matrix(symbol: str, days: int = None) -> pd.DataFrame:
+def get_volume_matrix(
+    symbol: str,
+    start_date: date = None,
+    end_date: date = None,
+) -> pd.DataFrame:
     """Get volume matrix for a token across all its available chains."""
     db = SessionLocal()
 
@@ -171,10 +197,10 @@ def get_volume_matrix(symbol: str, days: int = None) -> pd.DataFrame:
 
         matrix = pd.DataFrame(index=chains, columns=chains, dtype=float)
 
-        tokens = db.query(Token).filter_by(symbol=symbol).all()
+        tokens = db.query(Token).filter(
+            func.upper(Token.symbol) == symbol.upper()
+        ).all()
         chain_to_token = {t.chain: t.id for t in tokens if t.chain}
-
-        cutoff_date = get_cutoff_date(days)
 
         for from_chain in chains:
             for to_chain in chains:
@@ -191,11 +217,7 @@ def get_volume_matrix(symbol: str, days: int = None) -> pd.DataFrame:
                             BridgeTransaction.token_in_id == token_in_id,
                             BridgeTransaction.token_out_id == token_out_id,
                         )
-
-                        if cutoff_date:
-                            query = query.filter(
-                                BridgeTransaction.created_at >= cutoff_date
-                            )
+                        query = _apply_date_filter(query, start_date, end_date)
 
                         volume = query.scalar() or 0
                         matrix.loc[from_chain, to_chain] = volume
@@ -208,62 +230,80 @@ def get_volume_matrix(symbol: str, days: int = None) -> pd.DataFrame:
         db.close()
 
 
-def get_routes_data(days: int = None, percentile_type: str = "avg") -> pd.DataFrame:
-    """Get all routes with their volume and slippage."""
+def get_routes_data(
+    start_date: date = None,
+    end_date: date = None,
+    percentile_type: str | int = "avg",
+    min_amount: float = None,
+    max_amount: float = None,
+) -> pd.DataFrame:
+    """Get all routes with their volume, slippage, and median tx size (optimized with SQL aggregation)."""
     db = SessionLocal()
 
     try:
-        cutoff_date = get_cutoff_date(days)
+        # Create aliases for source and destination tokens
+        token_in_alias = aliased(Token, name="token_in")
+        token_out_alias = aliased(Token, name="token_out")
 
+        # Use percentile_cont for median tx size - PostgreSQL specific
         query = db.query(
-            BridgeTransaction.token_in_id, BridgeTransaction.token_out_id
-        ).distinct()
+            BridgeTransaction.token_in_id,
+            BridgeTransaction.token_out_id,
+            token_in_alias.symbol.label("source_token"),
+            token_in_alias.chain.label("source_chain"),
+            token_out_alias.symbol.label("dest_token"),
+            token_out_alias.chain.label("dest_chain"),
+            func.sum(BridgeTransaction.amount_in).label("volume"),
+            func.avg(BridgeTransaction.slippage).label("avg_slippage"),
+            func.count(BridgeTransaction.id).label("tx_count"),
+            func.percentile_cont(0.5).within_group(
+                BridgeTransaction.amount_in
+            ).label("median_tx_size"),
+        ).join(
+            token_in_alias, BridgeTransaction.token_in_id == token_in_alias.id
+        ).join(
+            token_out_alias, BridgeTransaction.token_out_id == token_out_alias.id
+        )
 
-        if cutoff_date:
-            query = query.filter(BridgeTransaction.created_at >= cutoff_date)
+        # Apply date filter before grouping
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            query = query.filter(BridgeTransaction.created_at >= start_datetime)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            query = query.filter(BridgeTransaction.created_at <= end_datetime)
 
-        pairs = query.all()
+        # Apply amount filter
+        if min_amount is not None:
+            query = query.filter(BridgeTransaction.amount_in >= min_amount)
+        if max_amount is not None:
+            query = query.filter(BridgeTransaction.amount_in < max_amount)
+
+        query = query.group_by(
+            BridgeTransaction.token_in_id,
+            BridgeTransaction.token_out_id,
+            token_in_alias.symbol,
+            token_in_alias.chain,
+            token_out_alias.symbol,
+            token_out_alias.chain,
+        )
+
+        results = query.all()
 
         routes = []
-        for token_in_id, token_out_id in pairs:
-            token_in = db.query(Token).filter_by(id=token_in_id).first()
-            token_out = db.query(Token).filter_by(id=token_out_id).first()
-
-            if not token_in or not token_out:
-                continue
-
-            tx_query = db.query(
-                BridgeTransaction.slippage, BridgeTransaction.amount_in
-            ).filter(
-                BridgeTransaction.token_in_id == token_in_id,
-                BridgeTransaction.token_out_id == token_out_id,
-            )
-
-            if cutoff_date:
-                tx_query = tx_query.filter(
-                    BridgeTransaction.created_at >= cutoff_date
-                )
-
-            transactions = tx_query.all()
-
-            if not transactions:
-                continue
-
-            slippages = [tx[0] for tx in transactions]
-            volumes = [tx[1] for tx in transactions]
-
-            total_volume = sum(volumes)
-            slippage_metric = calculate_percentile(slippages, percentile_type)
-            tx_count = len(transactions)
+        for row in results:
+            slippage_value = row.avg_slippage if row.avg_slippage is not None else 0
+            median_tx_size = row.median_tx_size if row.median_tx_size is not None else 0
 
             routes.append({
-                "Source Token": token_in.symbol,
-                "Source Chain": token_in.chain or NA_PLACEHOLDER,
-                "Dest Token": token_out.symbol,
-                "Dest Chain": token_out.chain or NA_PLACEHOLDER,
-                "Volume": total_volume,
-                "Slippage %": slippage_metric if slippage_metric is not None else 0,
-                "Transactions": tx_count,
+                "Source Token": row.source_token,
+                "Source Chain": row.source_chain or NA_PLACEHOLDER,
+                "Dest Token": row.dest_token,
+                "Dest Chain": row.dest_chain or NA_PLACEHOLDER,
+                "Volume": row.volume or 0,
+                "Slippage %": slippage_value,
+                "Transactions": row.tx_count,
+                "Median Tx Size": median_tx_size,
             })
 
         df = pd.DataFrame(routes)
@@ -277,43 +317,32 @@ def get_routes_data(days: int = None, percentile_type: str = "avg") -> pd.DataFr
         db.close()
 
 
-def get_overall_stats(days: int = None) -> dict:
-    """Get overall statistics with optional time filter."""
+def get_overall_stats(start_date: date = None, end_date: date = None) -> dict:
+    """Get overall statistics with optional date range filter."""
     db = SessionLocal()
 
     try:
         query = db.query(BridgeTransaction)
-
-        if days:
-            cutoff_date = get_cutoff_date(days)
-            query = query.filter(BridgeTransaction.created_at >= cutoff_date)
+        query = _apply_date_filter(query, start_date, end_date)
 
         total_txs = query.count()
         total_volume = (
             query.with_entities(func.sum(BridgeTransaction.amount_in)).scalar() or 0
         )
 
-        if total_txs > 0:
-            oldest = query.with_entities(
-                func.min(BridgeTransaction.created_at)
-            ).scalar()
-            newest = query.with_entities(
-                func.max(BridgeTransaction.created_at)
-            ).scalar()
-            date_range = f"{oldest.strftime('%Y-%m-%d')} to {newest.strftime('%Y-%m-%d')}"
-        else:
-            date_range = "No data"
-
         return {
             "transactions": total_txs,
             "volume": total_volume,
-            "date_range": date_range,
         }
     finally:
         db.close()
 
 
-def get_token_stats(symbol: str, days: int = None) -> dict:
+def get_token_stats(
+    symbol: str,
+    start_date: date = None,
+    end_date: date = None,
+) -> dict:
     """Get statistics for a token symbol (aggregated across all chains)."""
     db = SessionLocal()
 
@@ -330,10 +359,7 @@ def get_token_stats(symbol: str, days: int = None) -> dict:
             (BridgeTransaction.token_in_id.in_(token_ids))
             | (BridgeTransaction.token_out_id.in_(token_ids))
         )
-
-        if days:
-            cutoff_date = get_cutoff_date(days)
-            query = query.filter(BridgeTransaction.created_at >= cutoff_date)
+        query = _apply_date_filter(query, start_date, end_date)
 
         total_txs = query.count()
         total_volume = (
@@ -345,5 +371,56 @@ def get_token_stats(symbol: str, days: int = None) -> dict:
             "volume": total_volume,
             "symbol": symbol,
         }
+    finally:
+        db.close()
+
+
+def get_token_daily_stats(
+    symbol: str,
+    start_date: date = None,
+    end_date: date = None,
+) -> pd.DataFrame:
+    """Get daily volume and transaction counts for a token."""
+    db = SessionLocal()
+
+    try:
+        token_ids = get_token_ids_for_symbol(db, symbol)
+        if not token_ids:
+            return pd.DataFrame()
+
+        # Query with date truncation for daily grouping
+        query = db.query(
+            func.date_trunc('day', BridgeTransaction.created_at).label('date'),
+            func.sum(BridgeTransaction.amount_in).label('volume'),
+            func.count(BridgeTransaction.id).label('transactions'),
+        ).filter(
+            (BridgeTransaction.token_in_id.in_(token_ids))
+            | (BridgeTransaction.token_out_id.in_(token_ids))
+        )
+
+        query = _apply_date_filter(query, start_date, end_date)
+
+        query = query.group_by(
+            func.date_trunc('day', BridgeTransaction.created_at)
+        ).order_by(
+            func.date_trunc('day', BridgeTransaction.created_at)
+        )
+
+        results = query.all()
+
+        if not results:
+            return pd.DataFrame()
+
+        data = []
+        for row in results:
+            data.append({
+                "Date": row.date.date() if row.date else None,
+                "Volume": row.volume or 0,
+                "Transactions": row.transactions or 0,
+            })
+
+        df = pd.DataFrame(data)
+        return df
+
     finally:
         db.close()

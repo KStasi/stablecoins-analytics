@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -9,7 +9,13 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,  # Test connections before using them
+    pool_recycle=300,    # Recycle connections after 5 minutes
+    pool_size=5,         # Keep 5 connections in the pool
+    max_overflow=10,     # Allow up to 10 additional connections
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -38,7 +44,7 @@ class BridgeTransaction(Base):
     deposit_address = Column(String, index=True)
     deposit_address_and_memo = Column(String, unique=True, index=True, nullable=False)
     status = Column(String, index=True)
-    intent_hash = Column(String, index=True)
+    intent_hash = Column(Text)  # No index - can be very long (multiple hashes concatenated)
     created_at = Column(DateTime, nullable=False)
     fetched_at = Column(DateTime, default=datetime.utcnow)
     
