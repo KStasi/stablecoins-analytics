@@ -244,20 +244,22 @@ def get_routes_data(
         token_in_alias = aliased(Token, name="token_in")
         token_out_alias = aliased(Token, name="token_out")
 
+        # Use outer joins so transactions with missing token_in/token_out are still
+        # included; otherwise routes total volume would be less than DB total.
         query = db.query(
             BridgeTransaction.token_in_id,
             BridgeTransaction.token_out_id,
-            token_in_alias.symbol.label("source_token"),
-            token_in_alias.chain.label("source_chain"),
-            token_out_alias.symbol.label("dest_token"),
-            token_out_alias.chain.label("dest_chain"),
+            func.coalesce(token_in_alias.symbol, UNKNOWN_SYMBOL).label("source_token"),
+            func.coalesce(token_in_alias.chain, NA_PLACEHOLDER).label("source_chain"),
+            func.coalesce(token_out_alias.symbol, UNKNOWN_SYMBOL).label("dest_token"),
+            func.coalesce(token_out_alias.chain, NA_PLACEHOLDER).label("dest_chain"),
             func.sum(BridgeTransaction.amount_in).label("volume"),
             func.avg(BridgeTransaction.slippage).label("avg_slippage"),
             func.count(BridgeTransaction.id).label("tx_count"),
             func.avg(BridgeTransaction.amount_in).label("avg_tx_size"),
-        ).join(
+        ).outerjoin(
             token_in_alias, BridgeTransaction.token_in_id == token_in_alias.id
-        ).join(
+        ).outerjoin(
             token_out_alias, BridgeTransaction.token_out_id == token_out_alias.id
         )
 
@@ -278,10 +280,10 @@ def get_routes_data(
         query = query.group_by(
             BridgeTransaction.token_in_id,
             BridgeTransaction.token_out_id,
-            token_in_alias.symbol,
-            token_in_alias.chain,
-            token_out_alias.symbol,
-            token_out_alias.chain,
+            func.coalesce(token_in_alias.symbol, UNKNOWN_SYMBOL),
+            func.coalesce(token_in_alias.chain, NA_PLACEHOLDER),
+            func.coalesce(token_out_alias.symbol, UNKNOWN_SYMBOL),
+            func.coalesce(token_out_alias.chain, NA_PLACEHOLDER),
         )
 
         results = query.all()

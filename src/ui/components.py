@@ -8,7 +8,241 @@ from src.const import (
     NA_PLACEHOLDER,
     STABLECOINS,
     TRANSACTION_SIZE_FILTERS,
+    USDC_ZERO_FEE_ROUTES,
+    USDT_NATIVE_ZERO_FEE_ROUTES,
+    USDT0_ZERO_FEE_ROUTES,
 )
+
+
+# =============================================================================
+# CHAIN NAME NORMALIZATION
+# Maps database chain names (various cases/abbreviations) to canonical names
+# used in zero-fee route definitions
+# =============================================================================
+CHAIN_NAME_MAPPING = {
+    # Ethereum variants
+    "eth": "Ethereum",
+    "ETH": "Ethereum",
+    "ethereum": "Ethereum",
+    "Ethereum": "Ethereum",
+    # Optimism variants
+    "op": "OP Mainnet",
+    "OP": "OP Mainnet",
+    "optimism": "OP Mainnet",
+    "Optimism": "OP Mainnet",
+    # Arbitrum variants
+    "arb": "Arbitrum One",
+    "ARB": "Arbitrum One",
+    "arbitrum": "Arbitrum One",
+    "Arbitrum": "Arbitrum One",
+    "Arbitrum One": "Arbitrum One",
+    # Base variants
+    "base": "Base",
+    "BASE": "Base",
+    "Base": "Base",
+    # Polygon variants
+    "polygon": "Polygon",
+    "POLYGON": "Polygon",
+    "Polygon": "Polygon",
+    "matic": "Polygon",
+    "MATIC": "Polygon",
+    # BNB/BSC variants
+    "bnb": "BNB",
+    "BNB": "BNB",
+    "bsc": "BNB",
+    "BSC": "BNB",
+    # Avalanche variants
+    "avax": "Avalanche",
+    "AVAX": "Avalanche",
+    "avalanche": "Avalanche",
+    "Avalanche": "Avalanche",
+    # Solana variants
+    "sol": "Solana",
+    "SOL": "Solana",
+    "solana": "Solana",
+    "Solana": "Solana",
+    # Berachain variants
+    "bera": "Berachain",
+    "BERA": "Berachain",
+    "berachain": "Berachain",
+    "BERACHAIN": "Berachain",
+    "Berachain": "Berachain",
+    # Gnosis/xDAI variants
+    "gnosis": "Gnosis",
+    "GNOSIS": "Gnosis",
+    "Gnosis": "Gnosis",
+    "xdai": "Gnosis",
+    "XDAI": "Gnosis",
+    "xDAI": "Gnosis",
+    # NEAR variants
+    "near": "NEAR",
+    "NEAR": "NEAR",
+    "Near": "NEAR",
+    # Tron variants
+    "tron": "Tron",
+    "TRON": "Tron",
+    "Tron": "Tron",
+    # Bitcoin variants
+    "btc": "Bitcoin",
+    "BTC": "Bitcoin",
+    "bitcoin": "Bitcoin",
+    "Bitcoin": "Bitcoin",
+    # Litecoin variants
+    "ltc": "Litecoin",
+    "LTC": "Litecoin",
+    # XRP variants
+    "xrp": "XRP",
+    "XRP": "XRP",
+    # Dogecoin variants
+    "doge": "Dogecoin",
+    "DOGE": "Dogecoin",
+    # Aptos variants
+    "aptos": "Aptos",
+    "APTOS": "Aptos",
+    "Aptos": "Aptos",
+    # Sui variants
+    "sui": "Sui",
+    "SUI": "Sui",
+    "Sui": "Sui",
+    # Starknet variants
+    "starknet": "Starknet",
+    "STARKNET": "Starknet",
+    "Starknet": "Starknet",
+    # X Layer variants
+    "xlayer": "X Layer",
+    "XLAYER": "X Layer",
+    "X Layer": "X Layer",
+    # Velas variants
+    "velas": "Velas",
+    "VELAS": "Velas",
+    "Velas": "Velas",
+    # Rari variants
+    "rari": "Rari",
+    "RARI": "Rari",
+    "Rari": "Rari",
+    # Bitcoin Cash variants
+    "bch": "Bitcoin Cash",
+    "BCH": "Bitcoin Cash",
+    # Zcash variants
+    "zec": "Zcash",
+    "ZEC": "Zcash",
+    # Cardano variants
+    "cardano": "Cardano",
+    "CARDANO": "Cardano",
+    "Cardano": "Cardano",
+    "ada": "Cardano",
+    "ADA": "Cardano",
+    # Ink variants
+    "ink": "Ink",
+    "INK": "Ink",
+    "Ink": "Ink",
+    # Linea variants
+    "linea": "Linea Mainnet",
+    "LINEA": "Linea Mainnet",
+    "Linea": "Linea Mainnet",
+    "Linea Mainnet": "Linea Mainnet",
+    # Celo variants
+    "celo": "Celo",
+    "CELO": "Celo",
+    "Celo": "Celo",
+    # Mantle variants
+    "mantle": "Mantle",
+    "MANTLE": "Mantle",
+    "Mantle": "Mantle",
+    # Metis variants
+    "metis": "Metis",
+    "METIS": "Metis",
+    "Metis": "Metis",
+    # Sonic variants
+    "sonic": "Sonic",
+    "SONIC": "Sonic",
+    "Sonic": "Sonic",
+    # Fraxtal variants
+    "fraxtal": "Fraxtal",
+    "FRAXTAL": "Fraxtal",
+    "Fraxtal": "Fraxtal",
+    # Mode variants
+    "mode": "Mode Mainnet",
+    "MODE": "Mode Mainnet",
+    "Mode": "Mode Mainnet",
+    "Mode Mainnet": "Mode Mainnet",
+    # Unichain variants
+    "unichain": "Unichain",
+    "UNICHAIN": "Unichain",
+    "Unichain": "Unichain",
+    # Sei variants
+    "sei": "Sei Network",
+    "SEI": "Sei Network",
+    "Sei": "Sei Network",
+    "Sei Network": "Sei Network",
+    # Flare variants
+    "flare": "Flare Mainnet",
+    "FLARE": "Flare Mainnet",
+    "Flare": "Flare Mainnet",
+    "Flare Mainnet": "Flare Mainnet",
+    # Rootstock variants
+    "rootstock": "Rootstock",
+    "ROOTSTOCK": "Rootstock",
+    "Rootstock": "Rootstock",
+    "rsk": "Rootstock",
+    "RSK": "Rootstock",
+    # Corn variants
+    "corn": "Corn",
+    "CORN": "Corn",
+    "Corn": "Corn",
+    # Plasma variants
+    "plasma": "Plasma",
+    "PLASMA": "Plasma",
+    "Plasma": "Plasma",
+    # HyperEVM variants
+    "hyperevm": "HyperEVM",
+    "HYPEREVM": "HyperEVM",
+    "HyperEVM": "HyperEVM",
+    # Swellchain variants
+    "swellchain": "Swellchain",
+    "SWELLCHAIN": "Swellchain",
+    "Swellchain": "Swellchain",
+    "swell": "Swellchain",
+    "SWELL": "Swellchain",
+    # Lisk variants
+    "lisk": "Lisk",
+    "LISK": "Lisk",
+    "Lisk": "Lisk",
+    # Soneium variants
+    "soneium": "Soneium",
+    "SONEIUM": "Soneium",
+    "Soneium": "Soneium",
+    # Ronin variants
+    "ronin": "Ronin",
+    "RONIN": "Ronin",
+    "Ronin": "Ronin",
+    # Superseed variants
+    "superseed": "Superseed",
+    "SUPERSEED": "Superseed",
+    "Superseed": "Superseed",
+    # BOB variants
+    "bob": "BOB",
+    "BOB": "BOB",
+}
+
+
+def normalize_chain_name(chain_name: str) -> str:
+    """Normalize chain name from database format to canonical format.
+    
+    This function handles the various naming conventions used in the database
+    (e.g., 'eth', 'ETH', 'arb', 'OP', 'POLYGON', 'bera', 'BERACHAIN') and 
+    converts them to the canonical names used in zero-fee route definitions
+    (e.g., 'Ethereum', 'Arbitrum One', 'OP Mainnet', 'Polygon', 'Berachain').
+    
+    Args:
+        chain_name: The chain name as stored in the database
+        
+    Returns:
+        The canonical chain name, or the original name if no mapping exists
+    """
+    if not chain_name:
+        return chain_name
+    return CHAIN_NAME_MAPPING.get(chain_name, chain_name)
 
 
 def render_symbol_selector(symbols: list[str], key: str) -> str:
@@ -222,6 +456,68 @@ def render_routes_stats(df: pd.DataFrame) -> None:
         st.metric("Total Volume", f"${total_volume:,.0f}")
 
 
+def _normalize_token_symbol(symbol: str) -> str:
+    """Normalize token symbol for comparison.
+    
+    Handles variants like USDT, USDt, USDT0, USDT.E -> USDT
+    and USDC variants.
+    """
+    if not symbol:
+        return ""
+    upper = symbol.upper()
+    # Normalize USDT variants
+    if upper in ("USDT", "USDT0", "USDT.E", "USDTE"):
+        return "USDT"
+    return upper
+
+
+def _tokens_match_for_zero_fee(source_token: str, dest_token: str) -> bool:
+    """Check if source and destination tokens are the same (for zero-fee eligibility).
+    
+    Zero-fee bridging requires the same token on both ends (e.g., USDC -> USDC).
+    """
+    normalized_source = _normalize_token_symbol(source_token)
+    normalized_dest = _normalize_token_symbol(dest_token)
+    return normalized_source == normalized_dest
+
+
+def _get_zero_fee_status(source_chain: str, dest_chain: str, source_token: str, dest_token: str) -> str:
+    """Check if a zero-fee route exists for the given chain pair and tokens.
+
+    Returns:
+        - "✓" if zero-fee route exists
+        - "" if no zero-fee route
+        
+    Note: Zero-fee bridging requires the same token on both source and destination.
+    """
+    # First check if tokens match - zero-fee only applies to same-token transfers
+    if not _tokens_match_for_zero_fee(source_token, dest_token):
+        return ""
+    
+    token_upper = _normalize_token_symbol(source_token)
+
+    # Build lookup sets for each token type
+    usdc_routes = set(USDC_ZERO_FEE_ROUTES)
+    usdt_native_routes = set(USDT_NATIVE_ZERO_FEE_ROUTES)
+    usdt0_routes = set(USDT0_ZERO_FEE_ROUTES)
+
+    # Normalize chain names from database format to canonical format
+    normalized_source = normalize_chain_name(source_chain)
+    normalized_dest = normalize_chain_name(dest_chain)
+    route_pair = (normalized_source, normalized_dest)
+
+    # Check based on token type
+    if token_upper == "USDC":
+        if route_pair in usdc_routes:
+            return "✓"
+    elif token_upper == "USDT":
+        # Check both USDT native mesh and USDT0 routes
+        if route_pair in usdt_native_routes or route_pair in usdt0_routes:
+            return "✓"
+
+    return ""
+
+
 def render_routes_table_with_selection(df: pd.DataFrame, key: str) -> dict | None:
     """Render routes table with row selection. Returns selected route info."""
     if df.empty:
@@ -242,8 +538,19 @@ def render_routes_table_with_selection(df: pd.DataFrame, key: str) -> dict | Non
         + ")",
     )
 
+    # Add Zero Fee column - check if tokens match and route exists
+    display_df["Zero Fee"] = display_df.apply(
+        lambda row: _get_zero_fee_status(
+            row["Source Chain"],
+            row["Dest Chain"],
+            row["Source Token"],
+            row["Dest Token"]
+        ),
+        axis=1,
+    )
+
     # Columns to display (exclude the raw token/chain columns)
-    display_columns = ["Route", "Volume", "Slippage %", "Transactions"]
+    display_columns = ["Route", "Zero Fee", "Volume", "Slippage %", "Transactions"]
     if "Avg Tx Size" in display_df.columns:
         display_columns.append("Avg Tx Size")
 
@@ -258,6 +565,7 @@ def render_routes_table_with_selection(df: pd.DataFrame, key: str) -> dict | Non
         key=key,
         column_config={
             "Route": st.column_config.TextColumn("Route", width="large"),
+            "Zero Fee": st.column_config.TextColumn("Zero Fee", width="small", help="✓ indicates a zero-fee bridging path is available"),
             "Volume": st.column_config.NumberColumn("Volume", format="$%.0f"),
             "Slippage %": st.column_config.NumberColumn("Slippage %", format="%.4f%%"),
             "Transactions": st.column_config.NumberColumn("Transactions", format="%d"),
