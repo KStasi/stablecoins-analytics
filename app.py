@@ -8,7 +8,8 @@ from src.data_service import (
     get_transaction_counts,
     get_volume_matrix,
     get_routes_data,
-    get_overall_stats,
+    get_route_daily_stats,
+    get_route_slippage_percentile,
     get_token_stats,
     get_token_daily_stats,
 )
@@ -41,13 +42,8 @@ def cached_get_volume_matrix(symbol, start_date, end_date):
 
 
 @st.cache_data(ttl=CACHE_TTL_SHORT)
-def cached_get_routes_data(start_date, end_date, percentile_type, min_amount, max_amount):
-    return get_routes_data(start_date, end_date, percentile_type, min_amount, max_amount)
-
-
-@st.cache_data(ttl=CACHE_TTL_LONG)
-def cached_get_overall_stats(start_date, end_date):
-    return get_overall_stats(start_date, end_date)
+def cached_get_routes_data(start_date, end_date, min_amount, max_amount):
+    return get_routes_data(start_date, end_date, min_amount, max_amount)
 
 
 @st.cache_data(ttl=CACHE_TTL_LONG)
@@ -58,6 +54,16 @@ def cached_get_token_stats(symbol, start_date, end_date):
 @st.cache_data(ttl=CACHE_TTL_SHORT)
 def cached_get_token_daily_stats(symbol, start_date, end_date):
     return get_token_daily_stats(symbol, start_date, end_date)
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def cached_get_route_daily_stats(source_token, source_chain, dest_token, dest_chain, start_date, end_date):
+    return get_route_daily_stats(source_token, source_chain, dest_token, dest_chain, start_date, end_date)
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def cached_get_route_slippage_percentile(source_token, source_chain, dest_token, dest_chain, percentile_type, start_date, end_date):
+    return get_route_slippage_percentile(source_token, source_chain, dest_token, dest_chain, percentile_type, start_date, end_date)
 
 
 def main():
@@ -77,14 +83,21 @@ def main():
         st.header("Navigation")
         page = st.radio(
             "Go to",
-            ["Same Token Transfers", "Routes Analysis"],
+            ["Routes Analysis", "Same Token Transfers"],
             label_visibility="collapsed",
         )
 
     st.title("Stablecoin Bridge Analytics")
     st.markdown("### Cross-Chain Bridging Analysis Dashboard")
 
-    if page == "Same Token Transfers":
+    if page == "Routes Analysis":
+        render_routes_tab(
+            earliest_date=earliest_date,
+            get_routes_data_fn=cached_get_routes_data,
+            get_route_daily_stats_fn=cached_get_route_daily_stats,
+            get_route_slippage_percentile_fn=cached_get_route_slippage_percentile,
+        )
+    else:
         render_same_token_tab(
             symbols=symbols,
             earliest_date=earliest_date,
@@ -94,19 +107,9 @@ def main():
             get_volume_matrix_fn=cached_get_volume_matrix,
             get_token_daily_stats_fn=cached_get_token_daily_stats,
         )
-    else:
-        render_routes_tab(
-            earliest_date=earliest_date,
-            get_stats_fn=cached_get_overall_stats,
-            get_routes_data_fn=cached_get_routes_data,
-        )
 
     st.markdown("---")
     st.caption("**Slippage Formula:** (Amount In - Amount Out) / Amount In x 100%")
-    st.caption(
-        f"Data is cached for {CACHE_TTL_SHORT // 60} minute(s). "
-        "Use Refresh button to force update."
-    )
 
 
 if __name__ == "__main__":

@@ -233,11 +233,10 @@ def get_volume_matrix(
 def get_routes_data(
     start_date: date = None,
     end_date: date = None,
-    percentile_type: str | int = "avg",
     min_amount: float = None,
     max_amount: float = None,
 ) -> pd.DataFrame:
-    """Get all routes with their volume, slippage, and median tx size (optimized with SQL aggregation)."""
+    """Get all routes with their volume, average slippage, and avg tx size."""
     db = SessionLocal()
 
     try:
@@ -245,7 +244,6 @@ def get_routes_data(
         token_in_alias = aliased(Token, name="token_in")
         token_out_alias = aliased(Token, name="token_out")
 
-        # Use percentile_cont for median tx size - PostgreSQL specific
         query = db.query(
             BridgeTransaction.token_in_id,
             BridgeTransaction.token_out_id,
@@ -256,9 +254,7 @@ def get_routes_data(
             func.sum(BridgeTransaction.amount_in).label("volume"),
             func.avg(BridgeTransaction.slippage).label("avg_slippage"),
             func.count(BridgeTransaction.id).label("tx_count"),
-            func.percentile_cont(0.5).within_group(
-                BridgeTransaction.amount_in
-            ).label("median_tx_size"),
+            func.avg(BridgeTransaction.amount_in).label("avg_tx_size"),
         ).join(
             token_in_alias, BridgeTransaction.token_in_id == token_in_alias.id
         ).join(
@@ -293,7 +289,7 @@ def get_routes_data(
         routes = []
         for row in results:
             slippage_value = row.avg_slippage if row.avg_slippage is not None else 0
-            median_tx_size = row.median_tx_size if row.median_tx_size is not None else 0
+            avg_tx_size = row.avg_tx_size if row.avg_tx_size is not None else 0
 
             routes.append({
                 "Source Token": row.source_token,
@@ -303,7 +299,7 @@ def get_routes_data(
                 "Volume": row.volume or 0,
                 "Slippage %": slippage_value,
                 "Transactions": row.tx_count,
-                "Median Tx Size": median_tx_size,
+                "Avg Tx Size": avg_tx_size,
             })
 
         df = pd.DataFrame(routes)
@@ -421,6 +417,117 @@ def get_token_daily_stats(
 
         df = pd.DataFrame(data)
         return df
+
+    finally:
+        db.close()
+
+
+def get_route_daily_stats(
+    source_token: str,
+    source_chain: str,
+    dest_token: str,
+    dest_chain: str,
+    start_date: date = None,
+    end_date: date = None,
+) -> pd.DataFrame:
+    """Get daily volume and transaction counts for a specific route."""
+    db = SessionLocal()
+
+    try:
+        # Find source token ID
+        source_token_obj = db.query(Token).filter(
+            func.upper(Token.symbol) == source_token.upper(),
+            Token.chain == source_chain,
+        ).first()
+
+        # Find dest token ID
+        dest_token_obj = db.query(Token).filter(
+            func.upper(Token.symbol) == dest_token.upper(),
+            Token.chain == dest_chain,
+        ).first()
+
+        if not source_token_obj or not dest_token_obj:
+            return pd.DataFrame()
+
+        # Query with date truncation for daily grouping
+        query = db.query(
+            func.date_trunc('day', BridgeTransaction.created_at).label('date'),
+            func.sum(BridgeTransaction.amount_in).label('volume'),
+            func.count(BridgeTransaction.id).label('transactions'),
+        ).filter(
+            BridgeTransaction.token_in_id == source_token_obj.id,
+            BridgeTransaction.token_out_id == dest_token_obj.id,
+        )
+
+        query = _apply_date_filter(query, start_date, end_date)
+
+        query = query.group_by(
+            func.date_trunc('day', BridgeTransaction.created_at)
+        ).order_by(
+            func.date_trunc('day', BridgeTransaction.created_at)
+        )
+
+        results = query.all()
+
+        if not results:
+            return pd.DataFrame()
+
+        data = []
+        for row in results:
+            data.append({
+                "Date": row.date.date() if row.date else None,
+                "Volume": row.volume or 0,
+                "Transactions": row.transactions or 0,
+            })
+
+        return pd.DataFrame(data)
+
+    finally:
+        db.close()
+
+
+def get_route_slippage_percentile(
+    source_token: str,
+    source_chain: str,
+    dest_token: str,
+    dest_chain: str,
+    percentile_type: str | int,
+    start_date: date = None,
+    end_date: date = None,
+) -> float | None:
+    """Get slippage percentile for a specific route."""
+    db = SessionLocal()
+
+    try:
+        # Find source token ID
+        source_token_obj = db.query(Token).filter(
+            func.upper(Token.symbol) == source_token.upper(),
+            Token.chain == source_chain,
+        ).first()
+
+        # Find dest token ID
+        dest_token_obj = db.query(Token).filter(
+            func.upper(Token.symbol) == dest_token.upper(),
+            Token.chain == dest_chain,
+        ).first()
+
+        if not source_token_obj or not dest_token_obj:
+            return None
+
+        # Query slippage values
+        query = db.query(BridgeTransaction.slippage).filter(
+            BridgeTransaction.token_in_id == source_token_obj.id,
+            BridgeTransaction.token_out_id == dest_token_obj.id,
+        )
+
+        query = _apply_date_filter(query, start_date, end_date)
+
+        slippages = [s[0] for s in query.all() if s[0] is not None]
+
+        if not slippages:
+            return None
+
+        return calculate_percentile(slippages, percentile_type)
 
     finally:
         db.close()

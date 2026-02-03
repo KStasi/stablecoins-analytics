@@ -8,13 +8,13 @@ from src.ui.components import (
     render_transaction_size_filter,
     render_refresh_button,
     render_token_stats_row,
-    render_stats_row,
     render_slippage_matrix,
     render_transaction_counts_matrix,
     render_volume_matrix,
-    render_routes_table,
+    render_routes_table_with_selection,
     render_routes_stats,
     render_daily_chart,
+    render_route_daily_chart,
     get_percentile_label,
     filter_routes_by_stablecoin,
 )
@@ -85,8 +85,9 @@ def render_same_token_tab(
 
 def render_routes_tab(
     earliest_date: date | None,
-    get_stats_fn,
     get_routes_data_fn,
+    get_route_daily_stats_fn,
+    get_route_slippage_percentile_fn,
 ) -> None:
     """Render the Routes Analysis tab."""
     st.header("Routes Analysis")
@@ -103,29 +104,60 @@ def render_routes_tab(
     start_date, end_date = render_date_range_selector("period_tab2", earliest_date)
 
     # Row 3: Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
-        percentile_value = render_percentile_slider("percentile_tab2")
-        percentile_label = get_percentile_label(percentile_value)
-    with col2:
         stablecoin_filter = render_stablecoin_filter("stablecoin_filter")
-    with col3:
+    with col2:
         min_amount, max_amount = render_transaction_size_filter("tx_size_filter")
 
     st.markdown("---")
 
-    # Get routes data and apply stablecoin filter
-    routes_df = get_routes_data_fn(start_date, end_date, percentile_value, min_amount, max_amount)
+    # Get routes data and apply stablecoin filter (always use average slippage)
+    routes_df = get_routes_data_fn(start_date, end_date, min_amount, max_amount)
     filtered_routes_df = filter_routes_by_stablecoin(routes_df, stablecoin_filter)
 
-    # Stats row (after filters, before table)
-    overall_stats = get_stats_fn(start_date, end_date)
-    render_stats_row(overall_stats)
-
-    # Routes-specific stats
+    # Routes-specific stats (based on filtered data)
     render_routes_stats(filtered_routes_df)
 
     st.markdown("---")
 
-    st.subheader(f"All Routes - {percentile_label} Slippage")
-    render_routes_table(filtered_routes_df, percentile_label)
+    st.subheader("All Routes - Average Slippage")
+    selected_route = render_routes_table_with_selection(filtered_routes_df, "route_selector")
+
+    # Display details for selected route
+    if selected_route:
+        st.markdown("---")
+        st.subheader(f"Route Details: {selected_route['route_label']}")
+
+        # Percentile slider for selected route
+        percentile_value = render_percentile_slider("route_percentile")
+        percentile_label = get_percentile_label(percentile_value)
+
+        # Calculate and display slippage percentile
+        slippage_percentile = get_route_slippage_percentile_fn(
+            selected_route["source_token"],
+            selected_route["source_chain"],
+            selected_route["dest_token"],
+            selected_route["dest_chain"],
+            percentile_value,
+            start_date,
+            end_date,
+        )
+
+        if slippage_percentile is not None:
+            st.metric(f"{percentile_label} Slippage", f"{slippage_percentile:.4f}%")
+        else:
+            st.metric(f"{percentile_label} Slippage", "N/A")
+
+        st.markdown("---")
+
+        # Daily charts
+        daily_stats = get_route_daily_stats_fn(
+            selected_route["source_token"],
+            selected_route["source_chain"],
+            selected_route["dest_token"],
+            selected_route["dest_chain"],
+            start_date,
+            end_date,
+        )
+        render_route_daily_chart(daily_stats, selected_route["route_label"])

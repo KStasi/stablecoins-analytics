@@ -193,34 +193,40 @@ def filter_routes_by_stablecoin(df: pd.DataFrame, filter_type: str) -> pd.DataFr
 def render_routes_stats(df: pd.DataFrame) -> None:
     """Render routes statistics metrics."""
     if df.empty:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Routes", 0)
         with col2:
-            st.metric("Average Slippage", "N/A")
+            st.metric("Total Transactions", 0)
         with col3:
+            st.metric("Average Slippage", "N/A")
+        with col4:
             st.metric("Total Volume", "$0")
         return
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric("Total Routes", len(df))
 
     with col2:
+        total_transactions = df["Transactions"].sum()
+        st.metric("Total Transactions", f"{total_transactions:,}")
+
+    with col3:
         avg_slippage = df["Slippage %"].mean()
         st.metric("Average Slippage", f"{avg_slippage:.{DECIMAL_PLACES}f}%")
 
-    with col3:
+    with col4:
         total_volume = df["Volume"].sum()
         st.metric("Total Volume", f"${total_volume:,.0f}")
 
 
-def render_routes_table(df: pd.DataFrame, percentile_label: str) -> None:
-    """Render routes table with formatting."""
+def render_routes_table_with_selection(df: pd.DataFrame, key: str) -> dict | None:
+    """Render routes table with row selection. Returns selected route info."""
     if df.empty:
         st.warning("No routes found for the selected filters.")
-        return
+        return None
 
     display_df = df.copy()
     display_df.insert(
@@ -236,28 +242,76 @@ def render_routes_table(df: pd.DataFrame, percentile_label: str) -> None:
         + ")",
     )
 
-    # Build format dict based on available columns
-    format_dict = {
-        "Volume": "${:,.0f}",
-        "Slippage %": f"{{:.{DECIMAL_PLACES}f}}%",
-        "Transactions": "{:,}",
-    }
+    # Columns to display (exclude the raw token/chain columns)
+    display_columns = ["Route", "Volume", "Slippage %", "Transactions"]
+    if "Avg Tx Size" in display_df.columns:
+        display_columns.append("Avg Tx Size")
 
-    if "Median Tx Size" in display_df.columns:
-        format_dict["Median Tx Size"] = "${:,.0f}"
-
-    st.dataframe(
-        display_df.style.format(format_dict)
-        .background_gradient(
-            subset=["Slippage %"],
-            cmap="RdYlGn_r",
-            vmin=0,
-            vmax=display_df["Slippage %"].max() if not display_df.empty else 1,
-        )
-        .background_gradient(subset=["Volume"], cmap="Greens"),
+    # Use st.dataframe with selection enabled
+    event = st.dataframe(
+        display_df[display_columns],
         height=ROUTES_TABLE_HEIGHT,
         use_container_width=True,
+        hide_index=True,
+        selection_mode="single-row",
+        on_select="rerun",
+        key=key,
+        column_config={
+            "Route": st.column_config.TextColumn("Route", width="large"),
+            "Volume": st.column_config.NumberColumn("Volume", format="$%.0f"),
+            "Slippage %": st.column_config.NumberColumn("Slippage %", format="%.4f%%"),
+            "Transactions": st.column_config.NumberColumn("Transactions", format="%d"),
+            "Avg Tx Size": st.column_config.NumberColumn("Avg Tx Size", format="$%.0f"),
+        },
     )
+
+    # Check if a row is selected
+    if event and event.selection and event.selection.rows:
+        selected_idx = event.selection.rows[0]
+        row = df.iloc[selected_idx]
+        route_label = display_df.iloc[selected_idx]["Route"]
+        return {
+            "route_label": route_label,
+            "source_token": row["Source Token"],
+            "source_chain": row["Source Chain"],
+            "dest_token": row["Dest Token"],
+            "dest_chain": row["Dest Chain"],
+        }
+
+    return None
+
+
+def render_route_daily_chart(df: pd.DataFrame, route_label: str) -> None:
+    """Render daily volume and transactions chart for a route."""
+    if df.empty:
+        st.warning("No daily data available for this route.")
+        return
+
+    import altair as alt
+
+    # Volume chart
+    st.subheader(f"Daily Volume: {route_label}")
+    volume_chart = alt.Chart(df).mark_bar(color="#2ecc71").encode(
+        x=alt.X("Date:T", title="Date"),
+        y=alt.Y("Volume:Q", title="Volume ($)"),
+        tooltip=[
+            alt.Tooltip("Date:T", title="Date"),
+            alt.Tooltip("Volume:Q", title="Volume", format="$,.0f"),
+        ],
+    ).properties(height=250)
+    st.altair_chart(volume_chart, use_container_width=True)
+
+    # Transactions chart
+    st.subheader(f"Daily Transactions: {route_label}")
+    tx_chart = alt.Chart(df).mark_bar(color="#3498db").encode(
+        x=alt.X("Date:T", title="Date"),
+        y=alt.Y("Transactions:Q", title="Transactions"),
+        tooltip=[
+            alt.Tooltip("Date:T", title="Date"),
+            alt.Tooltip("Transactions:Q", title="Transactions", format=","),
+        ],
+    ).properties(height=250)
+    st.altair_chart(tx_chart, use_container_width=True)
 
 
 def render_daily_chart(df: pd.DataFrame, symbol: str) -> None:
