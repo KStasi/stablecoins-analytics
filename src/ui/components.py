@@ -345,3 +345,82 @@ def render_daily_chart(df: pd.DataFrame, symbol: str) -> None:
         ],
     ).properties(height=250)
     st.altair_chart(tx_chart, use_container_width=True)
+
+
+def render_zero_fee_matrix(
+    routes: list[tuple[str, str]],
+    token_name: str,
+    chain_order: list[str] | None = None,
+) -> None:
+    """Render a matrix showing zero-fee bridging routes.
+
+    Args:
+        routes: List of (source_chain, dest_chain) tuples representing zero-fee routes
+        token_name: Name of the token (e.g., "USDC", "USDT")
+        chain_order: Optional list specifying the order of chains in the matrix
+    """
+    if not routes:
+        st.warning(f"No zero-fee routes available for {token_name}.")
+        return
+
+    # Get unique chains from routes
+    route_chains = set()
+    for src, dst in routes:
+        route_chains.add(src)
+        route_chains.add(dst)
+
+    # Use provided chain_order if given, otherwise sort alphabetically
+    if chain_order:
+        chains = [c for c in chain_order if c in route_chains]
+        # Add any chains not in the predefined order
+        remaining = sorted([c for c in route_chains if c not in chain_order])
+        chains.extend(remaining)
+    else:
+        chains = sorted(route_chains)
+
+    # Create route set for O(1) lookup
+    route_set = set(routes)
+
+    # Build matrix data
+    matrix_data = []
+    for src in chains:
+        row = {"From \\ To": src}
+        for dst in chains:
+            if src == dst:
+                row[dst] = "-"
+            elif (src, dst) in route_set:
+                row[dst] = "✓"
+            else:
+                row[dst] = ""
+        matrix_data.append(row)
+
+    matrix_df = pd.DataFrame(matrix_data)
+    matrix_df = matrix_df.set_index("From \\ To")
+
+    # Custom styling function
+    def style_cell(val):
+        if val == "✓":
+            return "background-color: #2ecc71; color: white; font-weight: bold; text-align: center;"
+        elif val == "-":
+            return "background-color: #34495e; color: #7f8c8d; text-align: center;"
+        else:
+            return "background-color: #1a1a2e; text-align: center;"
+
+    styled_df = matrix_df.style.map(style_cell)
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.dataframe(
+            styled_df,
+            height=MATRIX_TABLE_HEIGHT,
+            use_container_width=True,
+        )
+
+    with col2:
+        st.markdown("**How to read:**")
+        st.markdown("- **Row** = Source Chain")
+        st.markdown("- **Column** = Destination Chain")
+        st.markdown("- ✓ = Zero-fee bridging available")
+        st.markdown("- Empty = Route not available")
+        st.markdown(f"- Total routes: **{len(routes)}**")

@@ -13,7 +13,7 @@ from src.data_service import (
     get_token_stats,
     get_token_daily_stats,
 )
-from src.ui.pages import render_same_token_tab, render_routes_tab
+from src.ui.pages import render_same_token_tab, render_routes_tab, render_zero_fee_routes_tab
 from src.auth import require_auth
 
 
@@ -87,7 +87,7 @@ def main():
         st.header("Navigation")
         page = st.radio(
             "Go to",
-            ["Routes Analysis", "Same Token Transfers"],
+            ["Routes Analysis", "Same Token Transfers", "Zero Fee Routes"],
             label_visibility="collapsed",
         )
 
@@ -101,7 +101,7 @@ def main():
             get_route_daily_stats_fn=cached_get_route_daily_stats,
             get_route_slippage_percentile_fn=cached_get_route_slippage_percentile,
         )
-    else:
+    elif page == "Same Token Transfers":
         render_same_token_tab(
             symbols=symbols,
             earliest_date=earliest_date,
@@ -111,6 +111,8 @@ def main():
             get_volume_matrix_fn=cached_get_volume_matrix,
             get_token_daily_stats_fn=cached_get_token_daily_stats,
         )
+    else:  # Zero Fee Routes
+        render_zero_fee_routes_tab()
 
     st.markdown("---")
     st.caption("**Slippage Formula:** (Amount In - Amount Out) / Amount In x 100%")

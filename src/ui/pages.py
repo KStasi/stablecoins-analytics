@@ -17,6 +17,15 @@ from src.ui.components import (
     render_route_daily_chart,
     get_percentile_label,
     filter_routes_by_stablecoin,
+    render_zero_fee_matrix,
+)
+from src.const import (
+    USDC_ZERO_FEE_ROUTES,
+    USDT_NATIVE_ZERO_FEE_ROUTES,
+    USDT0_ZERO_FEE_ROUTES,
+    ZERO_FEE_CHAINS_USDC,
+    ZERO_FEE_CHAINS_USDT_NATIVE,
+    ZERO_FEE_CHAINS_USDT0,
 )
 
 
@@ -161,3 +170,44 @@ def render_routes_tab(
             end_date,
         )
         render_route_daily_chart(daily_stats, selected_route["route_label"])
+
+
+def render_zero_fee_routes_tab() -> None:
+    """Render the Zero Fee Routes tab showing USDC and USDT zero-fee bridging matrices."""
+    st.header("Zero Fee Bridging Routes")
+
+    st.markdown(
+        """
+        This page shows all available routes where stablecoins can be bridged with **0% fees**.
+        These routes are ideal for cost-effective cross-chain transfers.
+        """
+    )
+
+    st.markdown("---")
+
+    # USDC Matrix
+    st.subheader("USDC Zero-Fee Routes")
+    if USDC_ZERO_FEE_ROUTES:
+        render_zero_fee_matrix(USDC_ZERO_FEE_ROUTES, "USDC", ZERO_FEE_CHAINS_USDC)
+    else:
+        st.info("No USDC zero-fee routes configured yet.")
+
+    st.markdown("---")
+
+    # USDT Native Mesh Matrix
+    st.subheader("USDT Native Mesh Zero-Fee Routes")
+    st.caption("USDT Native Mesh - Native USDT on various chains")
+    if USDT_NATIVE_ZERO_FEE_ROUTES:
+        render_zero_fee_matrix(USDT_NATIVE_ZERO_FEE_ROUTES, "USDT Native Mesh", ZERO_FEE_CHAINS_USDT_NATIVE)
+    else:
+        st.info("No USDT Native Mesh zero-fee routes configured yet.")
+
+    st.markdown("---")
+
+    # USDT0 Matrix
+    st.subheader("USDT0 Zero-Fee Routes")
+    st.caption("USDT0 - Bridged/wrapped USDT via LayerZero OFT standard")
+    if USDT0_ZERO_FEE_ROUTES:
+        render_zero_fee_matrix(USDT0_ZERO_FEE_ROUTES, "USDT0", ZERO_FEE_CHAINS_USDT0)
+    else:
+        st.info("No USDT0 zero-fee routes configured yet.")
