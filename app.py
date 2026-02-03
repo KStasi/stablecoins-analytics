@@ -14,6 +14,7 @@ from src.data_service import (
     get_token_daily_stats,
 )
 from src.ui.pages import render_same_token_tab, render_routes_tab
+from src.auth import require_auth
 
 
 @st.cache_data(ttl=CACHE_TTL_LONG)
@@ -68,6 +69,9 @@ def cached_get_route_slippage_percentile(source_token, source_chain, dest_token,
 
 def main():
     st.set_page_config(page_title="Stablecoin Bridge Analytics", layout="wide")
+
+    # Require authentication before showing any content
+    require_auth()
 
     init_db()
 
